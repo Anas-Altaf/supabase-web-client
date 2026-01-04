@@ -82,7 +82,38 @@
           <!-- Configuration Tab -->
           <div id="config-tab" class="tab-content">
             <h2 class="text-3xl font-bold mb-6">Configuration</h2>
-            <div class="bg-white rounded-lg shadow-md p-6">
+
+            <!-- Saved Connections -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+              <h3 class="text-xl font-bold mb-4">💾 Saved Connections</h3>
+              <div id="saved-connections" class="mb-4">
+                <!-- Saved connections will appear here -->
+              </div>
+              <button
+                onclick="showConnectionForm()"
+                class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+              >
+                ➕ Add New Connection
+              </button>
+            </div>
+
+            <!-- Connection Form -->
+            <div
+              id="connection-form"
+              class="bg-white rounded-lg shadow-md p-6 hidden"
+            >
+              <h3 class="text-xl font-bold mb-4">Add/Edit Connection</h3>
+              <div class="mb-4">
+                <label class="block text-gray-700 font-medium mb-2"
+                  >Connection Name</label
+                >
+                <input
+                  type="text"
+                  id="connection-name"
+                  placeholder="My Project"
+                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
                   >Supabase URL</label
@@ -122,24 +153,27 @@
               </div>
               <div class="flex gap-2">
                 <button
-                  onclick="saveConfig()"
+                  onclick="saveConnection()"
                   class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
                 >
-                  Save Configuration
+                  💾 Save Connection
                 </button>
                 <button
-                  onclick="clearToken()"
-                  class="bg-red-500 text-white px-6 py-2 rounded-lg hover:bg-red-600 transition"
+                  onclick="hideConnectionForm()"
+                  class="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition"
                 >
-                  Clear Token
+                  Cancel
                 </button>
               </div>
               <div id="config-status" class="mt-4"></div>
-              <div
-                class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg"
-              >
+            </div>
+
+            <!-- Current Status -->
+            <div class="bg-white rounded-lg shadow-md p-6 mt-6">
+              <h3 class="text-xl font-bold mb-4">Current Status</h3>
+              <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <p class="text-sm text-blue-800">
-                  <strong>Current Status:</strong><br />
+                  <strong>Active Connection:</strong><br />
                   <span id="auth-status">Not configured</span>
                 </p>
               </div>
@@ -642,25 +676,33 @@
         tableColumns: {},
       };
 
+      // Saved connections
+      let savedConnections = [];
+
       // Load config on page load
       window.onload = function () {
-        const savedUrl = localStorage.getItem("supabase-url");
-        const savedKey = localStorage.getItem("supabase-key");
-        const savedToken = localStorage.getItem("supabase-token");
-
-        if (savedUrl) {
-          document.getElementById("supabase-url").value = savedUrl;
-          config.url = savedUrl;
-        }
-        if (savedKey) {
-          document.getElementById("supabase-key").value = savedKey;
-          config.key = savedKey;
-        }
-        if (savedToken) {
-          document.getElementById("supabase-token").value = savedToken;
-          config.token = savedToken;
+        // Load saved connections
+        const savedConnsStr = localStorage.getItem("supabase-connections");
+        if (savedConnsStr) {
+          try {
+            savedConnections = JSON.parse(savedConnsStr);
+          } catch (e) {
+            savedConnections = [];
+          }
         }
 
+        // Load last active connection
+        const lastActiveId = localStorage.getItem("supabase-active-connection");
+        if (lastActiveId) {
+          const activeConn = savedConnections.find(
+            (c) => c.id === lastActiveId
+          );
+          if (activeConn) {
+            loadConnection(activeConn);
+          }
+        }
+
+        renderSavedConnections();
         updateAuthStatus();
 
         // Set initial active tab
@@ -686,10 +728,20 @@
       }
 
       // Save configuration
-      function saveConfig() {
-        const url = document.getElementById("supabase-url").value;
-        const key = document.getElementById("supabase-key").value;
-        const token = document.getElementById("supabase-token").value;
+      function saveConnection() {
+        const name = document.getElementById("connection-name").value.trim();
+        const url = document.getElementById("supabase-url").value.trim();
+        const key = document.getElementById("supabase-key").value.trim();
+        const token = document.getElementById("supabase-token").value.trim();
+
+        if (!name) {
+          showStatus(
+            "config-status",
+            "Please enter a connection name",
+            "error"
+          );
+          return;
+        }
 
         if (!url || !key) {
           showStatus(
@@ -700,38 +752,219 @@
           return;
         }
 
-        config.url = url;
-        config.key = key;
-        config.token = token;
+        // Check if editing existing connection
+        const editingId =
+          document.getElementById("connection-form").dataset.editId;
 
-        localStorage.setItem("supabase-url", url);
-        localStorage.setItem("supabase-key", key);
-
-        if (token) {
-          localStorage.setItem("supabase-token", token);
+        if (editingId) {
+          // Update existing connection
+          const index = savedConnections.findIndex((c) => c.id === editingId);
+          if (index !== -1) {
+            savedConnections[index] = {
+              id: editingId,
+              name,
+              url,
+              key,
+              token,
+              lastUsed: Date.now(),
+            };
+          }
         } else {
-          localStorage.removeItem("supabase-token");
+          // Create new connection
+          const newConnection = {
+            id: "conn-" + Date.now(),
+            name,
+            url,
+            key,
+            token,
+            lastUsed: Date.now(),
+          };
+          savedConnections.push(newConnection);
         }
 
-        updateAuthStatus();
+        // Save to localStorage
+        localStorage.setItem(
+          "supabase-connections",
+          JSON.stringify(savedConnections)
+        );
+
+        // Load this connection as active
+        const activeConn = editingId
+          ? savedConnections.find((c) => c.id === editingId)
+          : savedConnections[savedConnections.length - 1];
+
+        loadConnection(activeConn);
+
+        renderSavedConnections();
+        hideConnectionForm();
         showStatus(
           "config-status",
-          "Configuration saved successfully!",
+          "Connection saved successfully!",
           "success"
         );
       }
 
-      // Clear token
+      // Load a connection
+      function loadConnection(connection) {
+        config.url = connection.url;
+        config.key = connection.key;
+        config.token = connection.token || "";
+
+        // Update last used timestamp
+        connection.lastUsed = Date.now();
+        const index = savedConnections.findIndex((c) => c.id === connection.id);
+        if (index !== -1) {
+          savedConnections[index] = connection;
+          localStorage.setItem(
+            "supabase-connections",
+            JSON.stringify(savedConnections)
+          );
+        }
+
+        // Save as active connection
+        localStorage.setItem("supabase-active-connection", connection.id);
+
+        updateAuthStatus();
+        renderSavedConnections();
+      }
+
+      // Delete a connection
+      function deleteConnection(connectionId) {
+        if (!confirm("Are you sure you want to delete this connection?")) {
+          return;
+        }
+
+        savedConnections = savedConnections.filter(
+          (c) => c.id !== connectionId
+        );
+        localStorage.setItem(
+          "supabase-connections",
+          JSON.stringify(savedConnections)
+        );
+
+        // If deleted connection was active, clear config
+        const activeId = localStorage.getItem("supabase-active-connection");
+        if (activeId === connectionId) {
+          config = { url: "", key: "", token: "" };
+          localStorage.removeItem("supabase-active-connection");
+          updateAuthStatus();
+        }
+
+        renderSavedConnections();
+      }
+
+      // Edit a connection
+      function editConnection(connectionId) {
+        const connection = savedConnections.find((c) => c.id === connectionId);
+        if (!connection) return;
+
+        document.getElementById("connection-name").value = connection.name;
+        document.getElementById("supabase-url").value = connection.url;
+        document.getElementById("supabase-key").value = connection.key;
+        document.getElementById("supabase-token").value =
+          connection.token || "";
+
+        document.getElementById("connection-form").dataset.editId =
+          connectionId;
+        showConnectionForm();
+      }
+
+      // Show connection form
+      function showConnectionForm() {
+        document.getElementById("connection-form").classList.remove("hidden");
+        document.getElementById("connection-form").dataset.editId = "";
+        document.getElementById("connection-name").value = "";
+        document.getElementById("supabase-url").value = "";
+        document.getElementById("supabase-key").value = "";
+        document.getElementById("supabase-token").value = "";
+      }
+
+      // Hide connection form
+      function hideConnectionForm() {
+        document.getElementById("connection-form").classList.add("hidden");
+        document.getElementById("connection-form").dataset.editId = "";
+        document.getElementById("config-status").innerHTML = "";
+      }
+
+      // Render saved connections
+      function renderSavedConnections() {
+        const container = document.getElementById("saved-connections");
+        const activeId = localStorage.getItem("supabase-active-connection");
+
+        if (savedConnections.length === 0) {
+          container.innerHTML =
+            '<p class="text-gray-500 text-sm">No saved connections. Click "Add New Connection" to get started.</p>';
+          return;
+        }
+
+        // Sort by last used
+        const sorted = [...savedConnections].sort(
+          (a, b) => (b.lastUsed || 0) - (a.lastUsed || 0)
+        );
+
+        container.innerHTML = sorted
+          .map((conn) => {
+            const isActive = conn.id === activeId;
+            const urlPreview =
+              conn.url.length > 40
+                ? conn.url.substring(0, 40) + "..."
+                : conn.url;
+
+            return `
+                    <div class="border ${
+                      isActive
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-300"
+                    } rounded-lg p-4 mb-3">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <h4 class="font-bold text-lg flex items-center gap-2">
+                                    ${conn.name}
+                                    ${
+                                      isActive
+                                        ? '<span class="text-xs bg-blue-500 text-white px-2 py-1 rounded">Active</span>'
+                                        : ""
+                                    }
+                                </h4>
+                                <p class="text-sm text-gray-600 mt-1">${urlPreview}</p>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    ${
+                                      conn.token
+                                        ? "🔐 Using custom token"
+                                        : "🔑 Using anon key"
+                                    }
+                                </p>
+                            </div>
+                            <div class="flex gap-2">
+                                ${
+                                  !isActive
+                                    ? `<button onclick="loadConnection(savedConnections.find(c => c.id === '${conn.id}'))" class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600">
+                                    Use
+                                </button>`
+                                    : ""
+                                }
+                                <button onclick="editConnection('${
+                                  conn.id
+                                }')" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">
+                                    Edit
+                                </button>
+                                <button onclick="deleteConnection('${
+                                  conn.id
+                                }')" class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+          })
+          .join("");
+      }
+
+      // Clear token (legacy function, kept for compatibility)
       function clearToken() {
         config.token = "";
-        document.getElementById("supabase-token").value = "";
-        localStorage.removeItem("supabase-token");
         updateAuthStatus();
-        showStatus(
-          "config-status",
-          "Token cleared. Using anon key for requests.",
-          "info"
-        );
       }
 
       // Update auth status display
@@ -740,12 +973,18 @@
         if (!config.url || !config.key) {
           statusEl.innerHTML = "❌ Not configured";
           statusEl.className = "text-red-600 font-medium";
-        } else if (config.token) {
-          statusEl.innerHTML = "✅ Using custom access token";
-          statusEl.className = "text-green-600 font-medium";
         } else {
-          statusEl.innerHTML = "✅ Using anon key";
-          statusEl.className = "text-blue-600 font-medium";
+          const activeId = localStorage.getItem("supabase-active-connection");
+          const activeConn = savedConnections.find((c) => c.id === activeId);
+          const connName = activeConn ? activeConn.name : "Custom";
+
+          if (config.token) {
+            statusEl.innerHTML = `✅ ${connName} - Using custom access token`;
+            statusEl.className = "text-green-600 font-medium";
+          } else {
+            statusEl.innerHTML = `✅ ${connName} - Using anon key`;
+            statusEl.className = "text-blue-600 font-medium";
+          }
         }
       }
 
