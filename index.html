@@ -6,7 +6,6 @@
     <title>Supabase API Client</title>
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
-
   <body class="bg-gray-100">
     <div class="flex h-screen overflow-hidden">
       <!-- Sidebar -->
@@ -232,9 +231,11 @@
                 <input
                   type="text"
                   id="select-table"
+                  list="select-table-list"
                   placeholder="users"
                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <datalist id="select-table-list"></datalist>
               </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
@@ -243,10 +244,15 @@
                 <input
                   type="text"
                   id="select-columns"
+                  list="select-columns-list"
                   placeholder="*"
                   value="*"
                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <datalist id="select-columns-list"></datalist>
+                <p class="text-sm text-gray-600 mt-1">
+                  Available columns will appear after selecting a table
+                </p>
               </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
@@ -266,9 +272,11 @@
                 <input
                   type="text"
                   id="select-order"
+                  list="select-order-list"
                   placeholder="column.asc or column.desc"
                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <datalist id="select-order-list"></datalist>
               </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
@@ -311,9 +319,11 @@
                 <input
                   type="text"
                   id="insert-table"
+                  list="insert-table-list"
                   placeholder="users"
                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <datalist id="insert-table-list"></datalist>
               </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
@@ -358,9 +368,11 @@
                 <input
                   type="text"
                   id="update-table"
+                  list="update-table-list"
                   placeholder="users"
                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <datalist id="update-table-list"></datalist>
               </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
@@ -413,9 +425,11 @@
                 <input
                   type="text"
                   id="delete-table"
+                  list="delete-table-list"
                   placeholder="users"
                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <datalist id="delete-table-list"></datalist>
               </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
@@ -462,9 +476,11 @@
                 <input
                   type="text"
                   id="rpc-function"
+                  list="rpc-function-list"
                   placeholder="my_function"
                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <datalist id="rpc-function-list"></datalist>
               </div>
               <div class="mb-4">
                 <label class="block text-gray-700 font-medium mb-2"
@@ -619,6 +635,13 @@
         token: "",
       };
 
+      // Cache for fetched data
+      let cache = {
+        tables: [],
+        rpcFunctions: [],
+        tableColumns: {},
+      };
+
       // Load config on page load
       window.onload = function () {
         const savedUrl = localStorage.getItem("supabase-url");
@@ -634,8 +657,11 @@
           config.key = savedKey;
         }
         if (savedToken) {
+          document.getElementById("supabase-token").value = savedToken;
           config.token = savedToken;
         }
+
+        updateAuthStatus();
 
         // Set initial active tab
         document
@@ -663,6 +689,7 @@
       function saveConfig() {
         const url = document.getElementById("supabase-url").value;
         const key = document.getElementById("supabase-key").value;
+        const token = document.getElementById("supabase-token").value;
 
         if (!url || !key) {
           showStatus(
@@ -675,15 +702,51 @@
 
         config.url = url;
         config.key = key;
+        config.token = token;
 
         localStorage.setItem("supabase-url", url);
         localStorage.setItem("supabase-key", key);
 
+        if (token) {
+          localStorage.setItem("supabase-token", token);
+        } else {
+          localStorage.removeItem("supabase-token");
+        }
+
+        updateAuthStatus();
         showStatus(
           "config-status",
           "Configuration saved successfully!",
           "success"
         );
+      }
+
+      // Clear token
+      function clearToken() {
+        config.token = "";
+        document.getElementById("supabase-token").value = "";
+        localStorage.removeItem("supabase-token");
+        updateAuthStatus();
+        showStatus(
+          "config-status",
+          "Token cleared. Using anon key for requests.",
+          "info"
+        );
+      }
+
+      // Update auth status display
+      function updateAuthStatus() {
+        const statusEl = document.getElementById("auth-status");
+        if (!config.url || !config.key) {
+          statusEl.innerHTML = "❌ Not configured";
+          statusEl.className = "text-red-600 font-medium";
+        } else if (config.token) {
+          statusEl.innerHTML = "✅ Using custom access token";
+          statusEl.className = "text-green-600 font-medium";
+        } else {
+          statusEl.innerHTML = "✅ Using anon key";
+          statusEl.className = "text-blue-600 font-medium";
+        }
       }
 
       // Clear results
@@ -749,6 +812,20 @@
               .filter((path) => path.startsWith("/") && !path.includes("rpc"))
               .map((path) => path.substring(1));
 
+            // Store tables in cache
+            cache.tables = tables;
+
+            // Store column information
+            tables.forEach((table) => {
+              const tableInfo = data.definitions?.[table];
+              if (tableInfo?.properties) {
+                cache.tableColumns[table] = Object.keys(tableInfo.properties);
+              }
+            });
+
+            // Update all table dropdowns
+            updateTableDropdowns();
+
             showStatus(
               "tables-result",
               `Found ${tables.length} table(s)`,
@@ -757,10 +834,7 @@
 
             const tableList = tables
               .map((table) => {
-                const tableInfo = data.definitions?.[table];
-                const columns = tableInfo?.properties
-                  ? Object.keys(tableInfo.properties)
-                  : [];
+                const columns = cache.tableColumns[table] || [];
                 return `
                             <div class="border border-gray-300 rounded-lg p-4 mb-3">
                                 <h4 class="font-bold text-lg mb-2">📊 ${table}</h4>
@@ -819,6 +893,12 @@
               );
               return;
             }
+
+            // Store RPC functions in cache
+            cache.rpcFunctions = rpcFunctions;
+
+            // Update RPC dropdown
+            updateRPCDropdown();
 
             showStatus(
               "rpc-list-result",
@@ -1375,6 +1455,79 @@
           icon.textContent = "▶";
         }
       }
+
+      // Update table dropdowns with cached data
+      function updateTableDropdowns() {
+        const tableInputs = [
+          "select-table-list",
+          "insert-table-list",
+          "update-table-list",
+          "delete-table-list",
+        ];
+
+        tableInputs.forEach((inputId) => {
+          const datalist = document.getElementById(inputId);
+          datalist.innerHTML = "";
+          cache.tables.forEach((table) => {
+            const option = document.createElement("option");
+            option.value = table;
+            datalist.appendChild(option);
+          });
+        });
+      }
+
+      // Update RPC dropdown with cached data
+      function updateRPCDropdown() {
+        const datalist = document.getElementById("rpc-function-list");
+        datalist.innerHTML = "";
+        cache.rpcFunctions.forEach((func) => {
+          const option = document.createElement("option");
+          option.value = func;
+          datalist.appendChild(option);
+        });
+      }
+
+      // Update columns dropdown based on selected table
+      function updateColumnsDropdown(tableName) {
+        const columns = cache.tableColumns[tableName] || [];
+
+        const columnDatalistIds = ["select-columns-list", "select-order-list"];
+
+        columnDatalistIds.forEach((listId) => {
+          const datalist = document.getElementById(listId);
+          datalist.innerHTML = "";
+
+          // Add individual columns
+          columns.forEach((col) => {
+            const option = document.createElement("option");
+            option.value = col;
+            datalist.appendChild(option);
+          });
+
+          // Add sorting options for order dropdown
+          if (listId === "select-order-list") {
+            columns.forEach((col) => {
+              const optionAsc = document.createElement("option");
+              optionAsc.value = `${col}.asc`;
+              datalist.appendChild(optionAsc);
+
+              const optionDesc = document.createElement("option");
+              optionDesc.value = `${col}.desc`;
+              datalist.appendChild(optionDesc);
+            });
+          }
+        });
+      }
+
+      // Listen for table selection changes
+      document.addEventListener("DOMContentLoaded", function () {
+        const selectTableInput = document.getElementById("select-table");
+        if (selectTableInput) {
+          selectTableInput.addEventListener("input", function () {
+            updateColumnsDropdown(this.value);
+          });
+        }
+      });
     </script>
   </body>
 </html>
